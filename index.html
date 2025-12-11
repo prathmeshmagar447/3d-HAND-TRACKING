@@ -10,7 +10,7 @@
         #video-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
         video { width: 100%; height: 100%; object-fit: cover; }
 
-        /* HUD - iPhone Safe Area Aware */
+        /* HUD */
         #hud {
             position: absolute; bottom: 0; left: 0; width: 100%;
             display: flex; flex-direction: column; align-items: center; gap: 10px;
@@ -72,6 +72,15 @@
             border-radius: 30px; font-weight: 500; opacity: 0; transition: opacity 0.3s;
             pointer-events: none; font-size: 0.9rem; white-space: nowrap;
         }
+        
+        #instructions {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.85); padding: 25px; border-radius: 20px; color: white;
+            text-align: center; font-size: 1rem; z-index: 300; max-width: 85%;
+            border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(10px);
+            cursor: pointer;
+        }
+
         .color-dot { width: 34px; height: 34px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3); cursor: pointer; flex-shrink: 0; }
         .color-dot.active { border-color: #fff; transform: scale(1.15); box-shadow: 0 0 10px rgba(255,255,255,0.5); }
     </style>
@@ -94,16 +103,15 @@
     </div>
     <div id="toast">Ready</div>
 
-    <div id="instructions" onclick="this.style.display='none';" style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:rgba(0,0,0,0.8); padding:20px; border-radius:12px; color:white; text-align:center; font-size:1.1rem; z-index:300; max-width:90%; line-height:1.5; cursor:pointer;">
-        <strong>🎯 AR Architect Controls</strong><br>
-        📱 <b>Mobile:</b> Use pinch gestures (thumb+index) to place, fist to delete<br>
-        🍎 <b>iOS:</b> Tap AR icon to view in real AR<br>
-        🖥️ <b>Desktop:</b> Left-click to place, right-click to delete<br>
-        🎨 <b>Change Color:</b> Tap/click palette<br>
-        🎮 <b>Modes:</b> Paint, Move, Animate, Build<br>
-        🔊 <b>Audio:</b> Sound effects enhance your experience<br>
-        👥 <b>Multiplayer:</b> Share your build ID with friends!<br>
-        <br><i>Tap anywhere to start building!</i>
+    <div id="instructions" onclick="this.style.display='none'; startAudio();">
+        <div style="font-size:1.5rem; margin-bottom:10px">👋 Welcome!</div>
+        <div style="text-align:left; display:inline-block;">
+            👉 <b>Pinch</b> to Place/Paint<br>
+            ✊ <b>Fist</b> to Delete<br>
+            🙌 <b>Two Hands</b> to Scale<br>
+            🧊 <b>Tap 'AR'</b> for iOS Mode<br>
+        </div>
+        <div style="margin-top:20px; color:#007AFF; font-weight:bold;">Tap to Start & Enable Audio</div>
     </div>
     
     <a id="ar-link" rel="ar" href="" style="display:none;"><img src="https://upload.wikimedia.org/wikipedia/commons/4/4c/Ar_icon.svg"></a>
@@ -166,7 +174,6 @@
             PINCH_THRESH: 0.05, FIST_THRESH: 0.18, COOLDOWN: 400
         };
 
-        const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
         let handLandmarker, lastVideoTime = -1, lastActionTime = 0;
         const video = document.getElementById('webcam');
         const objects = [];
@@ -212,8 +219,16 @@
 
         // --- Audio ---
         let audioCtx = null;
+        window.startAudio = function() {
+            if(!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            } else if(audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        };
+
         function sfx(type) {
-            if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if(!audioCtx) return;
             if(audioCtx.state === 'suspended') audioCtx.resume();
             
             const osc = audioCtx.createOscillator();
@@ -319,18 +334,11 @@
 
         // --- iOS / Exports ---
         window.toggleCamera = async () => {
-            if(isMobile){
-                cameraFacingMode = (cameraFacingMode === "user") ? "environment" : "user";
-                await enableCam();
-                video.style.transform = "scaleX(-1)";
-                showToast(cameraFacingMode === "user" ? "Selfie Mode" : "World Mode");
-            } else {
-                // On laptop/desktop, always use selfie mode for better UX with mouse/hand fallback
-                cameraFacingMode = "user";
-                await enableCam();
-                video.style.transform = "scaleX(-1)";
-                showToast("Selfie Mode (Laptop/Desktop)");
-            }
+            cameraFacingMode = (cameraFacingMode === "user") ? "environment" : "user";
+            await enableCam();
+            // IMPORTANT: Mirror if user, Normal if environment
+            video.style.transform = (cameraFacingMode === "user") ? "scaleX(-1)" : "scaleX(1)";
+            showToast(cameraFacingMode === "user" ? "Selfie Mode" : "World Mode");
         };
         window.openARQuickLook = async () => {
             if(objects.length === 0) return showToast("Build first!");
@@ -371,14 +379,14 @@
                 video.srcObject = currentStream;
                 return new Promise(r => video.onloadeddata = r);
             } catch (e) {
-                showToast("Camera access failed - please allow camera permissions");
-                console.error("Camera error:", e);
-                throw e;
+                showToast("Camera Error: Allow Permissions");
+                console.error(e);
             }
         }
 
         async function init() {
             await enableCam();
+            video.style.transform = "scaleX(-1)"; // Default mirror for selfie
             initPeer();
             const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
             handLandmarker = await HandLandmarker.createFromOptions(vision, {
@@ -404,10 +412,11 @@
                 
                 if(useHand) {
                     const lm = res.landmarks[0];
-                    let x = lm[8].x; if(cameraFacingMode === "user") x = 1 - x;
+                    let x = lm[8].x; 
+                    if(cameraFacingMode === "user") x = 1 - x; // Mirror if user
                     pointer.set(x * 2 - 1, -(lm[8].y) * 2 + 1);
                 } else {
-                    pointer.copy(mousePtr); // Use mouse if no hand
+                    pointer.copy(mousePtr); 
                 }
                 
                 smoothPointer.lerp(pointer, 0.25);
