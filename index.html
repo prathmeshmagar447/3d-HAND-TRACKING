@@ -322,13 +322,13 @@
             if(isMobile){
                 cameraFacingMode = (cameraFacingMode === "user") ? "environment" : "user";
                 await enableCam();
-                video.style.transform = "scaleX(1)";
+                video.style.transform = "scaleX(-1)";
                 showToast(cameraFacingMode === "user" ? "Selfie Mode" : "World Mode");
             } else {
                 // On laptop/desktop, always use selfie mode for better UX with mouse/hand fallback
                 cameraFacingMode = "user";
                 await enableCam();
-                video.style.transform = "scaleX(1)";
+                video.style.transform = "scaleX(-1)";
                 showToast("Selfie Mode (Laptop/Desktop)");
             }
         };
