@@ -93,6 +93,18 @@
         <div style="opacity:0.6; font-size: 0.9rem; margin-top:5px">Initializing System...</div>
     </div>
     <div id="toast">Ready</div>
+
+    <div id="instructions" onclick="this.style.display='none';" style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:rgba(0,0,0,0.8); padding:20px; border-radius:12px; color:white; text-align:center; font-size:1.1rem; z-index:300; max-width:90%; line-height:1.5; cursor:pointer;">
+        <strong>🎯 AR Architect Controls</strong><br>
+        📱 <b>Mobile:</b> Use pinch gestures (thumb+index) to place, fist to delete<br>
+        🍎 <b>iOS:</b> Tap AR icon to view in real AR<br>
+        🖥️ <b>Desktop:</b> Left-click to place, right-click to delete<br>
+        🎨 <b>Change Color:</b> Tap/click palette<br>
+        🎮 <b>Modes:</b> Paint, Move, Animate, Build<br>
+        🔊 <b>Audio:</b> Sound effects enhance your experience<br>
+        👥 <b>Multiplayer:</b> Share your build ID with friends!<br>
+        <br><i>Tap anywhere to start building!</i>
+    </div>
     
     <a id="ar-link" rel="ar" href="" style="display:none;"><img src="https://upload.wikimedia.org/wikipedia/commons/4/4c/Ar_icon.svg"></a>
 
@@ -310,13 +322,13 @@
             if(isMobile){
                 cameraFacingMode = (cameraFacingMode === "user") ? "environment" : "user";
                 await enableCam();
-                video.style.transform = (cameraFacingMode === "user") ? "scaleX(-1)" : "scaleX(1)";
+                video.style.transform = "scaleX(1)";
                 showToast(cameraFacingMode === "user" ? "Selfie Mode" : "World Mode");
             } else {
                 // On laptop/desktop, always use selfie mode for better UX with mouse/hand fallback
                 cameraFacingMode = "user";
                 await enableCam();
-                video.style.transform = "scaleX(-1)";
+                video.style.transform = "scaleX(1)";
                 showToast("Selfie Mode (Laptop/Desktop)");
             }
         };
@@ -350,10 +362,19 @@
 
         // --- Logic ---
         async function enableCam() {
-            if(currentStream) currentStream.getTracks().forEach(t=>t.stop());
-            currentStream = await navigator.mediaDevices.getUserMedia({ video: { width: {ideal:1920}, height: {ideal:1080}, facingMode: cameraFacingMode } });
-            video.srcObject = currentStream;
-            return new Promise(r => video.onloadeddata = r);
+            try {
+                if(currentStream) currentStream.getTracks().forEach(t=>t.stop());
+                currentStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: {ideal:1920}, height: {ideal:1080}, facingMode: cameraFacingMode },
+                    audio: false
+                });
+                video.srcObject = currentStream;
+                return new Promise(r => video.onloadeddata = r);
+            } catch (e) {
+                showToast("Camera access failed - please allow camera permissions");
+                console.error("Camera error:", e);
+                throw e;
+            }
         }
 
         async function init() {
