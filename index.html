@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AR Architect V8 (Universal)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; user-select: none; -webkit-user-select: none; }
+        #video-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+
+        /* HUD - iPhone Safe Area Aware */
+        #hud {
+            position: absolute; bottom: 0; left: 0; width: 100%;
+            display: flex; flex-direction: column; align-items: center; gap: 10px;
+            pointer-events: none; z-index: 100;
+            padding-bottom: max(20px, env(safe-area-inset-bottom));
+        }
+
+        .bar {
+            display: flex; gap: 10px; pointer-events: auto;
+            background: rgba(20,20,20,0.85); padding: 8px 12px; border-radius: 18px;
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border: 0.5px solid rgba(255,255,255,0.2);
+            max-width: 92%; overflow-x: auto; scrollbar-width: none;
+        }
+        .bar::-webkit-scrollbar { display: none; }
+
+        .btn {
+            background: rgba(255,255,255,0.1); border: none; color: white; 
+            width: 44px; height: 44px; border-radius: 12px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; font-size: 1.3rem;
+            flex-shrink: 0; transition: transform 0.1s;
+        }
+        .btn:active { transform: scale(0.95); background: rgba(255,255,255,0.2); }
+        .btn.active { background: #007AFF; color: #fff; box-shadow: 0 0 15px rgba(0,122,255,0.4); }
+        .btn-danger { color: #ff453a; }
+        .btn-ios { width: auto; padding: 0 15px; font-size: 0.9rem; font-weight: 600; gap: 5px; }
+
+        /* Multiplayer Panel */
+        #mpPanel {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(20,20,20,0.95); padding: 25px; border-radius: 20px;
+            border: 1px solid #007AFF; color: white; text-align: center;
+            display: none; z-index: 200; pointer-events: auto; min-width: 300px;
+            backdrop-filter: blur(10px);
+        }
+        #mpPanel input {
+            background: #333; border: 1px solid #555; color: white;
+            padding: 12px; border-radius: 10px; width: 85%; margin: 15px 0; font-size: 1rem;
+        }
+        .mp-btn {
+            background: #007AFF; color: white; border: none; padding: 12px 20px;
+            border-radius: 10px; font-weight: bold; cursor: pointer; margin: 5px; font-size: 1rem; width: 100%;
+        }
+
+        #loading {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; display: flex; flex-direction: column; 
+            align-items: center; justify-content: center; color: #007AFF; z-index: 200;
+        }
+        .spinner {
+            width: 40px; height: 40px; border: 4px solid #333; border-top: 4px solid #007AFF;
+            border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        #toast {
+            position: absolute; top: max(20px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+            background: rgba(50,50,50,0.9); color: #fff; padding: 10px 24px;
+            border-radius: 30px; font-weight: 500; opacity: 0; transition: opacity 0.3s;
+            pointer-events: none; font-size: 0.9rem; white-space: nowrap;
+        }
+        .color-dot { width: 34px; height: 34px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3); cursor: pointer; flex-shrink: 0; }
+        .color-dot.active { border-color: #fff; transform: scale(1.15); box-shadow: 0 0 10px rgba(255,255,255,0.5); }
+    </style>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <div style="font-size: 1.2rem; font-weight: 600;">AR Architect V8</div>
+        <div style="opacity:0.6; font-size: 0.9rem; margin-top:5px">Initializing System...</div>
+    </div>
+    <div id="toast">Ready</div>
+    
+    <a id="ar-link" rel="ar" href="" style="display:none;"><img src="https://upload.wikimedia.org/wikipedia/commons/4/4c/Ar_icon.svg"></a>
+
+    <div id="mpPanel">
+        <h3 style="margin-top:0; color:#007AFF">Multiplayer</h3>
+        <div style="background:#222; padding:15px; border-radius:10px; margin-bottom:15px;">
+            <div style="font-size:0.7rem; color:#888;">YOUR ID</div>
+            <div id="myId" style="font-family:monospace; font-size:1.4rem; color:#fff; cursor:pointer;" onclick="copyId()">Generating...</div>
+        </div>
+        <input type="text" id="friendId" placeholder="Enter Friend's ID...">
+        <button class="mp-btn" onclick="connectToFriend()">Join Session</button>
+        <button class="mp-btn" style="background:transparent; border:1px solid #444; color:#ccc" onclick="closeMp()">Close</button>
+    </div>
+
+    <div id="hud">
+        <div class="bar">
+            <button class="btn btn-ios" onclick="openARQuickLook()" style="color:#007AFF">
+                <span>AR</span><span style="font-size:1.2rem">🧊</span>
+            </button>
+            <div style="width:1px; background:#555; height:20px;"></div>
+            <button class="btn" onclick="openMp()" title="Multiplayer">👥</button>
+            <button class="btn" onclick="toggleCamera()" title="Switch Cam">🔄</button>
+            <button class="btn" onclick="exportScene('gltf')" title="GLTF">📦</button>
+            <button class="btn" onclick="exportScene('stl')" title="STL">🖨️</button>
+            <button class="btn" onclick="saveJSON()" title="Save">💾</button>
+            <button class="btn" onclick="document.getElementById('fileInput').click()" title="Load">📂</button>
+            <button class="btn btn-danger" onclick="clearAll()">🗑️</button>
+        </div>
+
+        <div class="bar">
+            <button class="btn active" id="modeDraw" onclick="setMode('draw')">✏️</button>
+            <button class="btn" id="modePaint" onclick="setMode('paint')">🖌️</button>
+            <button class="btn" id="modeMove" onclick="setMode('move')">✋</button>
+            <button class="btn" id="modeAnim" onclick="setMode('anim')">🎬</button>
+            <div style="width:1px; background:#555; height:20px;"></div>
+            <button class="btn" onclick="setShape('box')">⬜</button>
+            <button class="btn" onclick="setShape('sphere')">⚪</button>
+            <button class="btn" onclick="setShape('cylinder')">🛢️</button>
+            <div style="width:1px; background:#555; height:20px;"></div>
+            <button class="btn" onclick="spawnTemplate('house')">🏠</button>
+            <button class="btn" onclick="spawnTemplate('tree')">🌲</button>
+        </div>
+
+        <div class="bar" id="palette"></div>
+    </div>
+
+    <input type="file" id="fileInput" accept=".json" onchange="loadJSON(this)" style="display:none">
+    <div id="video-container"><video id="webcam" autoplay playsinline></video></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { HandLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm';
+        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+        import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+        import { USDZExporter } from 'three/addons/exporters/USDZExporter.js';
+
+        const CONFIG = {
+            COLORS: ['#007AFF', '#FF3B30', '#34C759', '#FF9500', '#AF52DE', '#FFFFFF', '#1C1C1E', '#8E8E93'],
+            PINCH_THRESH: 0.05, FIST_THRESH: 0.18, COOLDOWN: 400
+        };
+
+        const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+        let handLandmarker, lastVideoTime = -1, lastActionTime = 0;
+        const video = document.getElementById('webcam');
+        const objects = [];
+        let particles = [];
+        let movingObject = null, scalingObject = null, lastPinchDist = 0;
+        let cameraFacingMode = "user";
+        let currentStream = null;
+        let state = { mode: 'draw', color: CONFIG.COLORS[0], shape: 'box' };
+
+        // Mouse Fallback
+        const mousePtr = new THREE.Vector2();
+        let isPinch = false, isFist = false;
+
+        // Network
+        let peer = null, conn = null, myPeerId = null;
+
+        // Three.js
+        const scene = new THREE.Scene();
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
+        camera.position.set(0, 5, 12); camera.lookAt(0,0,0);
+
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.0));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(5, 15, 10); dirLight.castShadow = true; scene.add(dirLight);
+
+        const gridHelper = new THREE.GridHelper(30, 30, 0x007AFF, 0x333333);
+        gridHelper.position.y = -0.5; scene.add(gridHelper);
+        const plane = new THREE.Mesh(new THREE.PlaneGeometry(100,100), new THREE.ShadowMaterial({ opacity: 0.3 }));
+        plane.rotation.x = -Math.PI/2; plane.position.y = -0.51; plane.receiveShadow = true; scene.add(plane);
+
+        const geoms = { box: new THREE.BoxGeometry(1,1,1), sphere: new THREE.SphereGeometry(0.6, 16, 16), cylinder: new THREE.CylinderGeometry(0.5,0.5,1,16), particle: new THREE.BoxGeometry(0.08,0.08,0.08) };
+        const cursor = new THREE.Mesh(geoms.box, new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, opacity: 0.6, transparent: true }));
+        scene.add(cursor);
+        
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        const smoothPointer = new THREE.Vector2();
+
+        // --- Audio ---
+        let audioCtx = null;
+        function sfx(type) {
+            if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if(audioCtx.state === 'suspended') audioCtx.resume();
+            
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            const t = audioCtx.currentTime;
+            
+            if(type === 'place') {
+                osc.frequency.setValueAtTime(300, t);
+                osc.frequency.exponentialRampToValueAtTime(600, t + 0.1);
+                gain.gain.setValueAtTime(0.1, t);
+                gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+                osc.type = 'sine';
+                osc.start(t); osc.stop(t + 0.1);
+            } else if(type === 'delete') {
+                osc.frequency.setValueAtTime(150, t);
+                osc.frequency.exponentialRampToValueAtTime(50, t + 0.2);
+                gain.gain.setValueAtTime(0.1, t);
+                gain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+                osc.type = 'square';
+                osc.start(t); osc.stop(t + 0.2);
+            } else if(type === 'connect') {
+                osc.frequency.setValueAtTime(400, t);
+                osc.frequency.linearRampToValueAtTime(800, t + 0.3);
+                gain.gain.setValueAtTime(0.1, t);
+                gain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+                osc.type = 'triangle';
+                osc.start(t); osc.stop(t + 0.3);
+            }
+        }
+
+        // --- Core ---
+        function createBlock(pos, color, shape, isRemote=false) {
+            const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.2, metalness: 0.1 });
+            const mesh = new THREE.Mesh(geoms[shape] || geoms.box, mat);
+            mesh.position.copy(pos); mesh.castShadow = true; mesh.receiveShadow = true;
+            mesh.userData = { shape: shape, animating: false, animOffset: Math.random()*10 };
+            
+            mesh.scale.set(0,0,0); scene.add(mesh); objects.push(mesh);
+            let s=0; const anim = () => { s+=0.2; mesh.scale.set(s,s,s); if(s<1) requestAnimationFrame(anim); }; anim();
+
+            if(!isRemote) broadcast({ type: 'place', pos: pos.toArray(), color: color, shape: shape });
+            return mesh;
+        }
+
+        function deleteObject(obj, isRemote=false) {
+            if(!isRemote) broadcast({ type: 'delete', pos: obj.position.toArray() });
+            scene.remove(obj); objects.splice(objects.indexOf(obj), 1);
+            spawnParticles(obj.position, obj.material.color);
+        }
+
+        function spawnParticles(pos, color) {
+            const mat = new THREE.MeshBasicMaterial({ color: color });
+            for(let i=0; i<6; i++) {
+                const p = new THREE.Mesh(geoms.particle, mat); p.position.copy(pos);
+                p.userData = { vel: new THREE.Vector3((Math.random()-.5)*.3, Math.random()*.3, (Math.random()-.5)*.3), life: 1 };
+                scene.add(p); particles.push(p);
+            }
+        }
+
+        // --- Templates ---
+        window.spawnTemplate = (type) => {
+            const p = cursor.position.clone();
+            const C = state.color;
+            if(type === 'house') {
+                for(let x=-1; x<=1; x++) for(let y=0; y<2; y++) for(let z=-1; z<=1; z++) createBlock(new THREE.Vector3(p.x+x, p.y+y, p.z+z), 0xeeeeee, 'box');
+                createBlock(new THREE.Vector3(p.x, p.y+3, p.z), 0xff3b30, 'box');
+            } else if(type === 'tree') {
+                createBlock(p.clone(), 0x8e8e93, 'box');
+                createBlock(p.clone().add(new THREE.Vector3(0,1,0)), 0x34c759, 'sphere');
+            }
+        };
+
+        // --- Networking ---
+        function initPeer() {
+            peer = new Peer("ar-" + Math.floor(Math.random()*9000+1000));
+            peer.on('open', id => { myPeerId = id; document.getElementById('myId').innerText = id; });
+            peer.on('connection', c => { setupConnection(c); showToast("Friend Connected!"); });
+        }
+        window.connectToFriend = () => {
+            const id = document.getElementById('friendId').value;
+            if(!id) return alert("Enter ID");
+            setupConnection(peer.connect(id));
+        };
+        function setupConnection(c) {
+            conn = c;
+            conn.on('open', () => {
+                closeMp(); showToast("Connected!"); sfx('connect');
+                if(objects.length > 0) conn.send({ type: 'sync', data: objects.map(o => ({pos: o.position.toArray(), color: '#'+o.material.color.getHexString(), shape: o.userData.shape})) });
+            });
+            conn.on('data', d => {
+                if(d.type === 'place') createBlock(new THREE.Vector3(...d.pos), d.color, d.shape, true);
+                if(d.type === 'delete') { const t = objects.find(o => o.position.distanceTo(new THREE.Vector3(...d.pos)) < 0.1); if(t) deleteObject(t, true); }
+                if(d.type === 'sync') { window.clearAll(true); d.data.forEach(x => createBlock(new THREE.Vector3(...x.pos), x.color, x.shape, true)); }
+            });
+        }
+        function broadcast(msg) { if(conn && conn.open) conn.send(msg); }
+        window.openMp = () => document.getElementById('mpPanel').style.display='block';
+        window.closeMp = () => document.getElementById('mpPanel').style.display='none';
+        window.copyId = () => { navigator.clipboard.writeText(myPeerId); showToast("ID Copied"); };
+
+        // --- iOS / Exports ---
+        window.toggleCamera = async () => {
+            if(isMobile){
+                cameraFacingMode = (cameraFacingMode === "user") ? "environment" : "user";
+                await enableCam();
+                video.style.transform = (cameraFacingMode === "user") ? "scaleX(-1)" : "scaleX(1)";
+                showToast(cameraFacingMode === "user" ? "Selfie Mode" : "World Mode");
+            } else {
+                // On laptop/desktop, always use selfie mode for better UX with mouse/hand fallback
+                cameraFacingMode = "user";
+                await enableCam();
+                video.style.transform = "scaleX(-1)";
+                showToast("Selfie Mode (Laptop/Desktop)");
+            }
+        };
+        window.openARQuickLook = async () => {
+            if(objects.length === 0) return showToast("Build first!");
+            showToast("Generating AR...");
+            const group = new THREE.Group(); objects.forEach(o => group.add(o.clone()));
+            const blob = new Blob([await new USDZExporter().parse(group)], { type: 'model/vnd.usdz+zip' });
+            const link = document.getElementById('ar-link'); link.href = URL.createObjectURL(blob); link.click();
+        };
+        window.exportScene = (fmt) => {
+            if(objects.length === 0) return showToast("Empty!");
+            if(fmt === 'gltf') new GLTFExporter().parse(scene, r => saveBlob(new Blob([JSON.stringify(r)], {type:'application/octet-stream'}), 'ar.gltf'), {onlyVisible:true});
+            if(fmt === 'stl') saveBlob(new Blob([new STLExporter().parse(scene)], {type:'text/plain'}), 'ar.stl');
+        };
+        function saveBlob(b, n) { const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=n; a.click(); }
+        window.saveJSON = () => saveBlob(new Blob([JSON.stringify(objects.map(o=>({pos:o.position.toArray(), color:'#'+o.material.color.getHexString(), shape:o.userData.shape})))]), 'ar.json');
+        window.loadJSON = (i) => { const r=new FileReader(); r.onload=e=>{ window.clearAll(); JSON.parse(e.target.result).forEach(d=>createBlock(new THREE.Vector3(...d.pos), d.color, d.shape)); }; r.readAsText(i.files[0]); };
+        window.clearAll = (remote=false) => { while(objects.length) scene.remove(objects.pop()); if(!remote) broadcast({type:'sync', data:[]}); };
+        
+        // --- UI ---
+        window.setMode = m => { state.mode = m; document.querySelectorAll('.btn').forEach(b=>b.classList.remove('active')); document.getElementById('mode'+m.charAt(0).toUpperCase()+m.slice(1)).classList.add('active'); showToast(m.toUpperCase()); };
+        window.setShape = s => { state.shape = s; cursor.geometry = geoms[s]; };
+        
+        CONFIG.COLORS.forEach(c => {
+            const d = document.createElement('div'); d.className = 'color-dot'; d.style.backgroundColor = c;
+            d.onclick = () => { state.color = c; if(state.mode==='draw') cursor.material.color.set(c); };
+            document.getElementById('palette').appendChild(d);
+        });
+        function showToast(m) { const t=document.getElementById('toast'); t.innerText=m; t.style.opacity=1; setTimeout(()=>t.style.opacity=0, 2000); }
+
+        // --- Logic ---
+        async function enableCam() {
+            if(currentStream) currentStream.getTracks().forEach(t=>t.stop());
+            currentStream = await navigator.mediaDevices.getUserMedia({ video: { width: {ideal:1920}, height: {ideal:1080}, facingMode: cameraFacingMode } });
+            video.srcObject = currentStream;
+            return new Promise(r => video.onloadeddata = r);
+        }
+
+        async function init() {
+            await enableCam();
+            initPeer();
+            const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+            handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                baseOptions: { modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`, delegate: "GPU" },
+                runningMode: "VIDEO", numHands: 2
+            });
+            
+            // Mouse Listeners
+            document.addEventListener('mousemove', e => mousePtr.set((e.clientX/window.innerWidth)*2-1, 1-2*(e.clientY/window.innerHeight)));
+            document.addEventListener('mousedown', e => { if(e.button===0) isPinch=true; if(e.button===2) isFist=true; });
+            document.addEventListener('mouseup', e => { isPinch=false; isFist=false; });
+            document.addEventListener('contextmenu', e => e.preventDefault());
+
+            document.getElementById('loading').style.display='none';
+            predict();
+        }
+
+        async function predict() {
+            if (handLandmarker && video.currentTime !== lastVideoTime) {
+                lastVideoTime = video.currentTime;
+                const res = handLandmarker.detectForVideo(video, performance.now());
+                const useHand = res.landmarks.length > 0;
+                
+                if(useHand) {
+                    const lm = res.landmarks[0];
+                    let x = lm[8].x; if(cameraFacingMode === "user") x = 1 - x;
+                    pointer.set(x * 2 - 1, -(lm[8].y) * 2 + 1);
+                } else {
+                    pointer.copy(mousePtr); // Use mouse if no hand
+                }
+                
+                smoothPointer.lerp(pointer, 0.25);
+                raycaster.setFromCamera(smoothPointer, camera);
+                const intersects = raycaster.intersectObjects([plane, ...objects], false);
+                
+                if (intersects.length > 0) {
+                    const hit = intersects[0];
+                    const target = new THREE.Vector3().copy(hit.point).add(hit.face.normal).floor().addScalar(0.5);
+                    if (state.mode === 'draw') cursor.position.copy(target);
+                    else cursor.position.copy((hit.object !== plane) ? hit.object.position : target);
+                }
+                
+                const now = Date.now();
+                if(now - lastActionTime > CONFIG.COOLDOWN) {
+                    let pinch = false, fist = false;
+                    
+                    if(useHand) {
+                        const lm = res.landmarks[0];
+                        pinch = Math.hypot(lm[8].x-lm[4].x, lm[8].y-lm[4].y) < CONFIG.PINCH_THRESH;
+                        fist = Math.hypot(lm[8].x-lm[0].x, lm[8].y-lm[0].y) < CONFIG.FIST_THRESH;
+                    } else {
+                        pinch = isPinch; fist = isFist;
+                    }
+
+                    if(pinch) {
+                        if(state.mode==='draw' && !objects.some(o=>o.position.equals(cursor.position))) { createBlock(cursor.position, state.color, state.shape); sfx('place'); }
+                        else if(state.mode==='paint') { const h = objects.find(o=>o.position.equals(cursor.position)); if(h) h.material.color.set(state.color); }
+                        else if(state.mode==='anim') { const h = objects.find(o=>o.position.equals(cursor.position)); if(h) h.userData.animating=!h.userData.animating; }
+                        else if(state.mode==='move') {
+                            if(movingObject) { movingObject.material.emissive.setHex(0x000000); movingObject=null; sfx('place'); }
+                            else { const h = objects.find(o=>o.position.equals(cursor.position)); if(h) { movingObject=h; h.material.emissive.setHex(0x444444); sfx('ui'); } }
+                        }
+                        lastActionTime = now;
+                    } else if(fist) {
+                         const h = objects.find(o=>o.position.equals(cursor.position));
+                         if(h) { deleteObject(h); sfx('delete'); lastActionTime = now; }
+                    }
+                }
+                
+                // Two hand scaling
+                if(useHand && res.landmarks.length > 1) {
+                     const lm = res.landmarks[0];
+                     const lmB = res.landmarks[1];
+                     const dist = Math.hypot(lm[8].x - lmB[8].x, lm[8].y - lmB[8].y);
+                     const pA = Math.hypot(lm[8].x - lm[4].x, lm[8].y - lm[4].y);
+                     const pB = Math.hypot(lmB[8].x - lmB[4].x, lmB[8].y - lmB[4].y);
+                     if(pA < CONFIG.PINCH_THRESH && pB < CONFIG.PINCH_THRESH) {
+                         if(!scalingObject) { scalingObject = objects.find(o => o.position.distanceTo(cursor.position) < 2); if(scalingObject) lastPinchDist = dist; }
+                         else { const s = scalingObject.scale.x + (dist - lastPinchDist)*2; if(s>0.2 && s<5) scalingObject.scale.set(s,s,s); lastPinchDist = dist; }
+                     } else scalingObject = null;
+                }
+            }
+            
+            // Updates
+            if(movingObject) movingObject.position.copy(cursor.position);
+            const t = Date.now() * 0.002;
+            objects.forEach(o => { if(o.userData.animating) { o.position.y += Math.sin(t+o.userData.animOffset)*0.005; o.rotation.y += 0.02; } });
+            particles.forEach((p,i) => { p.position.add(p.userData.vel); p.scale.setScalar(p.userData.life-=0.05); if(p.userData.life<=0) { scene.remove(p); particles.splice(i,1); } });
+            
+            renderer.render(scene, camera);
+            requestAnimationFrame(predict);
+        }
+
+        init();
+        window.addEventListener('resize', () => { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+    </script>
+</body>
+</html>
